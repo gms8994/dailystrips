@@ -2,9 +2,14 @@
 
 use File::Slurp;
 use Date::Manip;
+use Getopt::Long;
 
-my $dir = "/var/comics.dp.cx";
-my $baseurl = "http://comics.dp.cx";
+my ($options);
+
+GetOptions(\%options, 'dir|d=s', 'base|baseurl|b=s') or exit 1;
+
+my $dir = $options{'dir'};
+my $baseurl = $options{'base'};
 
 my @files = read_dir($dir);
 @files = grep(/html$/, @files);
@@ -15,7 +20,7 @@ my @files = read_dir($dir);
 open(SITEMAP,">$dir/sitemap.xml") || die "Can't open sitemap: $!";
 print SITEMAP <<END;
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.google.com/schemas/sitemap/0.84">
+<urlset xmlns="http://www.google.com/schemas/sitemap/0.9">
 END
 foreach my $file (@files) {
 	my $err;
