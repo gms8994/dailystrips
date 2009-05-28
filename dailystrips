@@ -6,9 +6,10 @@
 # Name:             dailystrips
 # Description:      creates an HTML page containing a number of online comics, with an easily exensible framework
 # Author:           Andrew Medico <amedico@amedico.dhs.org>
+# Author:           Glendon Solsberry <gms8994@dp.cx>
 # Created:          23 Nov 2000, 23:33 EST
-# Last Modified:    24 Aug 2003, 16:55 
-# Current Revision: 1.0.28
+# Last Modified:    27 May 2009, 16:13 EST
+# Current Revision: 1.0.29
 #
 
 
@@ -24,6 +25,7 @@ use File::Copy;
 use URI::Escape;
 use DBI;
 use Image::Size;
+use HTML::Template;
 
 
 # Variables
@@ -31,7 +33,7 @@ my (%options, $version, $time_today, @localtime_today, @localtime_yesterday, @lo
     $short_date_yesterday, $short_date_tomorrow, @get, @strips, %defs, $known_strips, %groups, $known_groups, %classes, $val,
     $link_tomorrow, $no_dateparse, @base_dirparts,$dbh);
 
-$version = "1.0.28";
+$version = "1.0.29";
 
 $time_today = time;
 
@@ -44,7 +46,7 @@ GetOptions(\%options, 'quiet|q','verbose','output=s','lite','local|l','noindex',
 	'new|n','defs=s','nopersonal','basedir=s','list','proxy=s',
 	'proxyauth=s','noenvproxy','nospaces','useragent=s','version|v','help|h',
 	'avantgo', 'random','nosystem','stripnav','nosymlinks','titles=s',
-	'retries=s','clean=s','updates=s','noupdates','verbose') or exit 1;
+	'retries=s','clean=s','updates=s','noupdates','verbose','template=s') or exit 1;
 
 # Process options:
 #  Note: Blocks have been ordered so that we only do as much as absolutely
@@ -496,6 +498,7 @@ if (-e "dailystrips-$short_date_tomorrow.html") {
 
 
 # Generate HTML page
+my $template;
 if ($options{'lite'}) {
 	print "<font face=\"helvetica\" size=\"+2\"><b><u>$options{'titles'}dailystrips for $long_date</u></b></font><br><br>\n";
 } else {
@@ -504,50 +507,17 @@ if ($options{'lite'}) {
 		$topanchor = "\n<a name=\"top\">\n";
 	}
 
-	print
-"<!DOCTYPE HTML>
-<html>
+    $template = HTML::Template->new(filename => $options{'template'}, die_on_bad_params => 0);
+    $template->param(DATE => $long_date);
+    $template->param(PREV_DAY => $short_date_yesterday);
 
-<head>
-	<title>$options{'titles'}dailystrips for $long_date</title>
-	<link rel=\"stylesheet\" type=\"text/css\" href=\"comics.css\">
-	<link rel=\"alternate\" type=\"application/rss+xml\" title=\"All Comics, RSS 1.0\" href=\"http://comics.dp.cx/rss.php\" />
-	<META name=\"verify-v1\" content=\"NROT83kBphoVsr35EGOEP3r+TOJ0E3E1qp16QybNRVA=\" />
-	<link rel=\"alternate\" type=\"application/rss+xml\" title=\"'New Comics', RSS 1.0\" href=\"http://comics.dp.cx/rssnew.php\" />
-    <script type=\"text/javascript\" src=\"/comic.js\"></script>
-    <script type=\"text/javascript\" src=\"/ie6-upgrade-warning-read-only/ie6/warning.js\"></script>
-</head>
-
-<body>
-<!--[if lte IE 6]><script src=\"/ie6-upgrade-warning-read-only/ie6/warning.js\"></script><script>window.onload=function(){e(\"/ie6-upgrade-warning-read-only/ie6/\")}</script><![endif]-->
-
-$topanchor
-<center>
-	<font face=\"helvetica\" size=\"+2\"><b><u>$options{'titles'}dailystrips for $long_date</u></b></font>
-</center>
-
-<p><font face=\"helvetica\">
-&lt; <a href=\"dailystrips-$short_date_yesterday.html\">Previous day</a>$link_tomorrow";
-	
 	if ($options{'archive'}) {
-		print " | <a href=\"archive.html\">Archives</a>";
+        $template->param(ARCHVE => "<a href=\"archive.html\">Archives</a>");
 	}
 	
-	print
-" &gt;
-</font></p>
-";
-
 	if ($options{'stripnav'}) {
-		print "<font face=\"helvetica\">Strips:</font><br>\n";
-		for (@strips) {
-			my ($strip, $name) = (split(/;/, $_))[0,1];
-			print "<a href=\"#$strip\">$name</A>&nbsp;&nbsp;";
-		}
-		print "\n<br><br>";
+        $template->param(STRIPNAV => 'Strips');
 	}
-
-	print "\n\n<table border=\"0\">\n";
 }
 
 
@@ -559,10 +529,11 @@ if ($options{'local'} and !$options{'quiet'}) {
 	}
 }
 
+my @loop_data;
 for (@strips) {
 	my ($strip, $name, $homepage, $img_addr, $referer, $prefetch, $artist, $source) = split(/;/, $_);
 	my ($img_line, $local_name, $local_name_dir, $local_name_file, $local_name_ext, $image, $ext,
-	   $local_name_yesterday, $local_name_yesterday_dir, $local_name_yesterday_file, $local_name_yesterday_ext, $ct);
+	   $local_name_yesterday, $local_name_yesterday_dir, $local_name_yesterday_file, $local_name_yesterday_ext, $ct, %row_data);
 	
 	if ($options{'verbose'} and $options{'local'}) {
 		warn "Downloading strip file for " . lc((split(/;/, $_))[0]) . "\n";
@@ -577,9 +548,6 @@ for (@strips) {
 	} else {
 		if ($options{'local'}) {
 			# local mode - download strips
-			if ($options{'verbose'}) {
-				warn $img_addr;
-			}
 			$img_addr =~ /http:\/\/(.*)\/(.*)\.(.*?)([?&].+)?$/;
 			if (defined $3) { $ext = ".$3" }
 
@@ -644,12 +612,22 @@ for (@strips) {
 				} else {
 					$img_addr = $local_name;
 					$img_addr =~ s/ /\%20/go;
-					if ($options{'stripnav'}) {
-						my ($width, $height) = imgsize($local_name);
-						$img_line = "<img src=\"$img_addr\" alt=\"$name\" style=\"height: ${height}px; width: ${width}px;\"><br><a href=\"#top\">Return to top</a>";
-					} else {
-						$img_line = "<img src=\"$img_addr\" alt=\"$name\">";
-					}
+
+                    $row_data{LC_COMIC} = lc($name);
+                    $row_data{NAME} = $name;
+                    $row_data{IMAGE} = $img_addr;
+
+                    $row_data{E_NAME} = $row_data{NAME}; $row_data{E_NAME} =~ s/\s/%20/g; $row_data{E_NAME} =~ s/&(?!amp;)/&amp;/g;
+                    $row_data{E_IMAGE} = $row_data{IMAGE}; $row_data{E_IMAGE} =~ s/\s/%20/g; $row_data{E_IMAGE} =~ s/&(?!amp;)/&amp;/g;
+
+                    if (defined($homepage)) {
+                        $row_data{LINK} = $homepage;
+                    }
+                    if (defined($artist)) {
+                        $row_data{ARTIST} = $artist;
+                    }
+                    # the crucial step - push a reference to this row into the loop!
+                    push(@loop_data, \%row_data);
 				}
 			} else {			
 				# need to download
@@ -786,6 +764,22 @@ for (@strips) {
 							}
 						}
 					}
+                    $row_data{LC_COMIC} = lc($name);
+                    $row_data{NAME} = $name;
+                    $row_data{IMAGE} = $img_addr;
+
+                    $row_data{E_NAME} = $row_data{NAME}; $row_data{E_NAME} =~ s/\s/%20/g; $row_data{E_NAME} =~ s/&(?!amp;)/&amp;/g;
+                    $row_data{E_IMAGE} = $row_data{IMAGE}; $row_data{E_IMAGE} =~ s/\s/%20/g; $row_data{E_IMAGE} =~ s/&(?!amp;)/&amp;/g;
+
+                    if (defined($homepage)) {
+                        $row_data{LINK} = $homepage;
+                    }
+                    if (defined($artist)) {
+                        $row_data{ARTIST} = $artist;
+                    }
+
+                    # the crucial step - push a reference to this row into the loop!
+                    push(@loop_data, \%row_data);
 					# create table archive (aid int auto_increment primary key, comic varchar(255), comicdate date, url varchar(255));
 					if ($dbh) {
 						my $sql = "INSERT INTO archive (comic,comicdate,url) VALUES (".$dbh->quote($name).",current_date,".$dbh->quote($img_addr).")";
@@ -804,10 +798,6 @@ for (@strips) {
 		}
 	}
 		
-	if ($artist) {
-		$artist = " by $artist";
-	}
-	
 	if ($options{'lite'}){
 		print
 "<font face=\"helvetica\" size=\"+1\"><b><a href=\"$homepage\">$name</a>$artist</b></font>&nbsp;&nbsp;<small><a href=\"archivecomic.php?comic=".uri_escape($name,"^A-Za-z0-9\-_.!~*'()")."\">Archive</a></small><br>
@@ -819,22 +809,13 @@ $img_line<br>
 		if ($options{'stripnav'}) {
 			$stripanchor = "<a name=\"$strip\">";
 		}
-		
-		print
-"	<tr>
-		<td>
-			<font face=\"helvetica\" size=\"+1\"><b>$stripanchor<a href=\"$homepage\">$name</a>$artist</b></font>&nbsp;&nbsp;<small><a href=\"archivecomic.php?comic=$name\">Archive</a></small>
-		</td>
-	</tr>
-	<tr>
-		<td>
-			$img_line
-			<p>&nbsp;</p>
-		</td>
-	</tr>
-";
 	}
 }
+
+$template->param(COMICS => \@loop_data);
+
+print STDOUT $template->output();
+
 
 if ($options{'local'} and !$options{'quiet'}) {
 	if ($options{'verbose'}) {
@@ -842,29 +823,6 @@ if ($options{'local'} and !$options{'quiet'}) {
 	} else {
 		warn "done\n"
 	}
-}
-
-unless ($options{'lite'}) {
-	print
-"</table>
-
-<p><font face=\"helvetica\">
-&lt; <a href=\"dailystrips-$short_date_yesterday.html\">Previous day</a>$link_tomorrow";
-
-	if ($options{'archive'}) {
-		print " | <a href=\"archive.html\">Archives</a>";
-	}
-	
-	print
-" &gt;
-</font></p>
-
-<font face=\"helvetica\">Generated by dailystrips $version</font>
-<span style=\"display:none;visibility: hidden;\"><a href=\"mailto:scumsuckercomics\@dp.cx\">mailme\@dp.cx</a></span>
-</body>
-
-</html>
-";
 }
 
 if (!$options{'date'} and !$options{'noindex'} and $^O =~ /Win32/) {
@@ -963,7 +921,7 @@ sub get_strip {
 			my @regexmatch;
 			for (1..9) {
 				$regexmatch[$_] = ${$_};
-				warn "regex match #$_: ${$_}\n";	
+				# warn "regex match #$_: ${$_}\n";	
 			}
 
 			unless (${$defs{$strip}{'matchpart'}}) {
